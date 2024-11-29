@@ -1,0 +1,593 @@
+<?php
+session_start();
+if (!isset($_SESSION['userId'])) {
+    header("Location: login.php");
+    exit();
+}
+
+require_once 'config.php';
+date_default_timezone_set('Asia/Manila');
+
+$userId = $_SESSION["userId"];
+$currentRoom = "";
+
+$myRoomIds = array();
+
+if(isset($_GET["id"])){
+    $currentRoom = $_GET["id"];
+    $fetch_my_chatrooms_prompt = "SELECT * FROM members WHERE userId = $userId and status = 1";
+    $fetch_my_chatrooms = mysqli_query($link, $fetch_my_chatrooms_prompt);
+    while($chatroom = mysqli_fetch_assoc($fetch_my_chatrooms)){
+        $roomId = $chatroom['chatroomId'];
+        $myRoomIds[] = $roomId;
+    }
+    if(!in_array($currentRoom, $myRoomIds) && !$currentRoom == 0){
+        header("Location: index.php?id=0");
+        exit();
+    }
+} else{
+    header("Location: index.php?id=0");
+    exit();
+}
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $message = $_POST['message'];
+    // Handle file upload
+    $targetDir = "messageUploads/";
+    $fileName = basename($_FILES["photo"]["name"]);
+    $uniqueFileName = time() . '_' . $fileName;
+    $targetFilePath = $targetDir . $uniqueFileName;
+    $fileType = pathinfo($targetFilePath, PATHINFO_EXTENSION);
+    if (!empty($_FILES["photo"]["name"])) {
+        // Allow certain file formats
+        $allowTypes = array('jpg', 'png', 'jpeg', 'gif', 'pdf');
+        if (in_array($fileType, $allowTypes)) {
+            // Upload file to server
+            if (move_uploaded_file($_FILES["photo"]["tmp_name"], $targetFilePath)) {
+                $photo = $targetFilePath;
+            } else {
+                $photo = "";
+            }
+        } else {
+            $photo = "";
+        }
+    } else {
+        $photo = "";
+    }
+
+    // Insert message and photo into the database
+    if(empty(trim($message)) && empty(trim($photo))){
+        echo    "<script>
+                    alert('No Messages Detected');
+                </script>";
+    } else if(empty(trim($message))){
+        $sql = "INSERT INTO messages (userId, chatroomId, uploadFilePath) VALUES ($userId, $currentRoom, '$photo')";
+        mysqli_query($link, $sql);
+    
+        $currentDateTime = date('Y-m-d H:i:s');
+    
+        $newLastUpdatedValue = $currentDateTime;
+    
+        $updateChatroom = "UPDATE chatrooms SET lastActive = '$newLastUpdatedValue' WHERE chatroomId = $currentRoom";
+        mysqli_query($link, $updateChatroom);
+    } else if(empty(trim($photo))){
+        $sql = "INSERT INTO messages (userId, chatroomId, message) VALUES ($userId, $currentRoom, '$message')";
+        mysqli_query($link, $sql);
+    
+        $currentDateTime = date('Y-m-d H:i:s');
+    
+        $newLastUpdatedValue = $currentDateTime;
+    
+        $updateChatroom = "UPDATE chatrooms SET lastActive = '$newLastUpdatedValue' WHERE chatroomId = $currentRoom";
+        mysqli_query($link, $updateChatroom);
+
+    } else{
+        $sql = "INSERT INTO messages (userId, chatroomId, message, uploadFilePath) VALUES ($userId, $currentRoom, '$message', '$photo')";
+        mysqli_query($link, $sql);
+    
+        $currentDateTime = date('Y-m-d H:i:s');
+    
+        $newLastUpdatedValue = $currentDateTime;
+    
+        $updateChatroom = "UPDATE chatrooms SET lastActive = '$newLastUpdatedValue' WHERE chatroomId = $currentRoom";
+        mysqli_query($link, $updateChatroom);
+    }
+    
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Chat Rooms</title>
+        <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body {
+                margin: 0;
+                font-family: "Lato", sans-serif;
+                height: 100%;
+                width: 100%;
+            }
+            #side-nav {
+                position: fixed;
+                height: 100%;
+                width: 6%;
+                background-color: aqua;
+                overflow-x: hidden;
+                overflow-y: scroll;
+            }
+            #side-nav::-webkit-scrollbar {display: none;}
+            #side-nav #contacts {
+                position: sticky;
+                top: 0;
+                border-bottom: 3px solid saddlebrown;
+                background-color: aqua;
+                padding-top: 1px;
+                z-index: 9999;}
+            #side-nav .inactive {
+                margin: 10px 0px 10px 0px;
+                height: 64px;
+                width: 64px;
+                border-radius: 50%;
+                overflow: hidden;
+                transition: all 0.3s ease-in-out;
+            }
+            #side-nav .inactive:hover {border-radius: 20%;}
+            #side-nav .active {
+                margin: 10px 0px 10px 0px;
+                height: 64px;
+                width: 64px;
+                border-radius: 20%;
+                overflow: hidden;
+            }
+            #side-nav .profile-pic {
+                height: 100%;
+                background-color: white;
+            }
+            #side-nav #exit{
+                position: sticky;
+                bottom: 0;
+                background-color: aqua;
+                border-top: 3px solid black;
+                padding-bottom: 1px;
+                z-index: 9999; 
+            }
+
+            #sidebar {
+                position: fixed;
+                margin-left: 6%;
+                height: 100%;
+                width: 15%;
+                background-color: lime;
+                overflow-x: hidden;
+                overflow-y: scroll;
+            }
+            #sidebar::-webkit-scrollbar {display: none;}
+            #sidebar #current-room-logo{
+                background-color: white;
+                width: 100%;
+                border-bottom: 3px solid black;
+            }
+            #sidebar .member-dropdown {
+                display: flex; /* Use flexbox */
+                justify-content: space-between;
+                align-items: center; /* Vertically center items */
+                border-top: 3px solid black;
+                border-bottom: 3px solid black;
+                padding: 5px;
+            }
+            #sidebar .member-dropdown p {
+                cursor: context-menu;
+                font-size: 24px;
+                margin: 0; /* Reset margin to ensure accurate centering */
+            }
+            #sidebar .dropdown-icon{
+                width: 30px;
+            }
+            #sidebar .dropdown-icon-flipped {
+                width: 30px;
+                transform: scaleY(-1); /* Flip the image vertically */
+            }
+            .member-details {
+                position: relative;
+                width: 100%;
+                display: inline-block;
+                border-bottom: 3px solid grey;
+            }
+
+            .member-details-btn {
+                background-color: transparent;
+                border: none;
+                cursor: pointer;
+                display: flex; /* Make button a flex container */
+                align-items: center; /* Vertically center align */
+            }
+
+            .member-details-btn img {
+                width: 32px;
+                height: auto;
+                border-radius: 50%;
+                margin-right: 5px; /* Adjust margin to separate image from text */
+                align-self: center;
+            }
+
+            .member-details.disabled .member-details-btn {
+                pointer-events: none; /* Disable pointer events */
+                color: blue; /* Change text color to blue */
+            }
+
+            .member-details-content {
+                display: none;
+                position: absolute;
+                background-color: #f9f9f9;
+                min-width: 160px;
+                box-shadow: 0 8px 16px 0 rgba(0,0,0,0.2);
+                z-index: 1;
+            }
+
+            .member-details-content.show {
+                display: block;
+            }
+
+            .member-details-content ul {
+                list-style-type: none;
+                padding: 0;
+                margin: 0;
+            }
+
+            .member-details-content a {
+                color: black;
+                padding: 12px 16px;
+                text-decoration: none;
+                display: block;
+            }
+
+            .member-details-content a:hover {
+                background-color: #f1f1f1;
+            }
+
+            .member-details.hidden{
+                display: none;
+            }
+            .member-details.disabled .member-details-content {
+                display: none; /* Hide content when dropdown is disabled */
+            }
+            #sidebar .hidden-member-sub-group{display: none}
+            #sidebar .member-sub-group{
+                text-align: left;
+                border-top: 3px solid black;
+                border-bottom: 3px solid black;
+                background-color: red;
+            }
+            #sidebar #leave-chat-button{
+                display: block;
+                margin: 10px 0px 10px 0px;
+                border-top: 3px solid black;
+                border-bottom: 3px solid black;
+                text-align: center;
+                text-decoration: none;
+                color: red;
+            }
+
+            #chat-area {
+                position: fixed;
+                margin-left: 21%;
+                height: 100%;
+                width: 79%;
+                background-color: gold;
+            }
+            #chat-area #chat-box {
+                position: fixed;
+                height: 90%;
+                width: 79%;
+                overflow-x: hidden;
+                overflow-y: scroll;
+            }
+            #chat-area #chat-box::-webkit-scrollbar {display: none;}
+            #chat-area #chat-box h1.friendless{
+                text-align: center;
+                position: absolute;
+                bottom: 0;
+            }
+            #chat-area #chat-box .message-block{
+                margin-top: 5px;
+                padding-left: 5px;
+                padding-top: 5px;
+                width: 100%;
+                display: inline-block;
+                background-color: blue;
+            }
+
+            #chat-area #chat-box .message-block .my-message-box{
+                right: 0;
+                background-color: green;
+                border-radius: 5px;
+                padding-top: 3px;
+                padding-left: 5px;
+            }
+            #chat-area #chat-box .my-message {
+                margin-right: 10px;
+                display: inline-block;
+                max-width: fit-content;
+                padding: 10px;
+                text-align: right;
+            }
+            #chat-area #chat-box .message img {margin-top: 5px;}
+            #chat-area #chat-box .message-photo{
+                height:250px;
+                width:auto;
+            }
+
+            #chat-area #message-form{
+                position: fixed;
+                bottom: 0;
+                padding: 10px;
+                width: 79%;
+                background-color: rgba(0, 0, 0, 0);
+                height: 10%;
+                overflow-y: hidden;
+            }
+            #chat-area #message-form::-webkit-scrollbar {display: none;}
+
+            .reset-file.inactive{display: none}
+        </style>
+    </head>
+    <body>
+        <div id="side-nav">
+            <center>
+            <div id="contacts">
+                <?php
+                    if($currentRoom == 0){
+                        echo    '<div class="active" id="0" onclick="redirectTo(id)">
+                                    <img src="chatroomLogos/aclc-blue.png" alt="avatar" class="profile-pic" title="Menu">
+                                </div>';
+                    } else{
+                        echo    '<div class="inactive" id="0" onclick="redirectTo(id)">
+                                    <img src="chatroomLogos/aclc-blue.png" alt="avatar" class="profile-pic" title="Menu">
+                                </div>';
+                    }
+                ?>
+            </div>
+            <?php
+                $fetch_all_chatrooms_prompt = "SELECT * FROM chatrooms ORDER BY lastActive DESC";
+                $fetch_all_chatrooms = mysqli_query($link, $fetch_all_chatrooms_prompt);
+                while($chatroom = mysqli_fetch_assoc($fetch_all_chatrooms)){
+                    $roomId = $chatroom['chatroomId'];
+                    if (in_array($roomId, $myRoomIds)) {
+                        $roomName =  $chatroom['chatroomName'];
+                        $logo = $chatroom['logo'];
+                        if($currentRoom == $roomId){
+                            echo    '<div class="active" id="'.$roomId.'" onclick="redirectTo(id)">
+                                        <img src="'.$logo.'" alt="avatar" class="profile-pic" title="'.$roomName.'">
+                                    </div>';
+                        } else{
+                            echo    '<div class="inactive" id="'.$roomId.'" onclick="redirectTo(id)">
+                                        <img src="'.$logo.'" alt="avatar" class="profile-pic" title="'.$roomName.'">
+                                    </div>';
+                        }
+                    }
+                }
+            ?>
+            
+            <div id="exit">
+                <div class="inactive" onclick="location.href='add_room.php?join=0'">
+                    <img src="chatroomLogos/add.jpg" alt="avatar" class="profile-pic" title="Add Room">
+                </div>
+                <div class="inactive" onclick="location.href='settings.php'">
+                    <img src="chatroomLogos/settings2.png" alt="avatar" class="profile-pic" title="Settings">
+                </div>
+                <div class="inactive" onclick="location.href='logout.php'">
+                    <img src="chatroomLogos/logout.jpg" alt="avatar" class="profile-pic" title="Log Out">
+                </div>
+            </div>
+            </center>
+        </div>
+        <div id="sidebar">
+            <?php
+            if($currentRoom == 0){
+
+            } else{
+                $fetch_room = mysqli_query($link, "SELECT * FROM chatrooms WHERE chatroomId = $currentRoom");
+                $room = mysqli_fetch_assoc($fetch_room);
+                $chatroom_logo = $room["logo"];
+                $roomName = $room["chatroomName"];
+                $roomCode = $room["chatroomCode"];
+
+                $fetch_member = mysqli_query($link, "SELECT * FROM members WHERE chatroomId = $currentRoom AND userId = $userId AND status = 1");
+                $member = mysqli_fetch_assoc($fetch_member);
+                $isAdmin = $member["isAdmin"];
+                $tempId = "member-dropdown-icon";
+                echo "<img src='$chatroom_logo' id='current-room-logo'>";
+                echo "<p style= 'font-size: 24px; margin: 5px'>$roomName</p>";
+                echo "<p style= 'font-size: 16px; color: `grey`; margin: 5px'>Roomcode: $roomCode</p>";
+                echo '<div class="member-dropdown" onclick="toggleDropdownIcon()">';
+                echo '    <p>Members</p>'; // Removed inline styles for simplicity
+                echo '    <img src="chatroomLogos/dropdown.png" id="member-dropdown-icon" class="dropdown-icon">';
+                echo '</div>';
+
+                $fetch_members_prompt = "SELECT * FROM members WHERE chatroomId = $currentRoom AND status = 1";
+                $fetch_members = mysqli_query($link, $fetch_members_prompt);
+                if($isAdmin == 1){
+                    while ($members = mysqli_fetch_assoc($fetch_members)) {
+                        $memberId = $members["userId"];
+                        $fetch_member_info = "SELECT * FROM users WHERE userId = $memberId";
+                        $member_info = mysqli_fetch_assoc(mysqli_query($link, $fetch_member_info));
+                        $member_img = $member_info["imagePath"];
+                        $member_name = $member_info["username"];
+                        if($memberId == $userId){
+                            echo    '<div class="member-details hidden disabled">
+                                        <button class="member-details-btn">
+                                            <img src="'.$member_img.'" alt="Icon"> '.$member_name.'
+                                        </button>
+                                    </div>';
+                        } else{
+                            echo    '<div class="member-details hidden">
+                                        <button class="member-details-btn">
+                                            <img src="'.$member_img.'" alt="Icon"> '.$member_name.' ▼
+                                        </button>
+                                        <div class="member-details-content">
+                                            <ul>
+                                                <li><a href="#">Message</a></li>
+                                                <li><a href="#">Kick</a></li>
+                                                <li><a href="#">Blacklist</a></li>
+                                            </ul>
+                                        </div>
+                                    </div>';
+                        }
+                    }
+                } else{
+                    while ($members = mysqli_fetch_assoc($fetch_members)) {
+                        $memberId = $members["userId"];
+                        $fetch_member_info = "SELECT * FROM users WHERE userId = $memberId";
+                        $member_info = mysqli_fetch_assoc(mysqli_query($link, $fetch_member_info));
+                        $member_img = $member_info["imagePath"];
+                        $member_name = $member_info["username"];
+                        if($memberId == $userId){
+                            echo    '<div class="member-details hidden hidden disabled">
+                                        <button class="member-details-btn">
+                                            <img src="'.$member_img.'" alt="Icon"> '.$member_name.'
+                                        </button>
+                                    </div>';
+                        } else{
+                            echo    '<div class="member-details hidden">
+                                        <button class="member-details-btn">
+                                            <img src="'.$member_img.'" alt="Icon"> '.$member_name.' ▼
+                                        </button>
+                                        <div class="member-details-content">
+                                            <ul>
+                                                <li><a href="#">Message</a></li>
+                                            </ul>
+                                        </div>
+                                    </div>';
+                        }
+                    }
+                }
+                
+                echo "<a id='leave-chat-button' href='leave_chatroom.php?userId=$userId&roomId=$currentRoom'>Leave Chat</a>";
+            }
+            ?>
+        </div>
+        
+        <div id="chat-area">
+            <div id="chat-box">
+                <?php
+                    if($currentRoom == 0){
+                        echo    "<h1 class='friendless'>Start by adding a new conversation.</h1>";
+                    }
+                    else{
+                        $messages = array();
+                        $fetch_messages_prompt = "SELECT * FROM messages WHERE chatroomId=$currentRoom ORDER BY dateSent DESC LIMIT 50";
+                        $fetch_messages = mysqli_query($link, $fetch_messages_prompt);
+
+                        while ($message = mysqli_fetch_assoc($fetch_messages)) {
+                            $messageContent = '';
+
+                            $senderId = $message['userId'];
+                            $fetch_sender_prompt = "SELECT * FROM users WHERE userId=$senderId";
+                            $fetch_sender = mysqli_fetch_assoc(mysqli_query($link, $fetch_sender_prompt));
+                            
+                            $sendername = $fetch_sender['username'];
+                        
+                            // Check if the message contains text
+                            if (!empty($message['message'])) {
+                                $messageContent .= "<div class='my-message-box'><p>" . $message['message'] . "</p></div>";
+                            }
+                        
+                            // Check if the message contains a photo
+                            if (!empty($message['uploadFilePath'])) {
+                                $messageContent .= "<img src='" . $message['uploadFilePath'] . "' alt='photo' class='message-photo'>";
+                            }
+                        
+                            // Add the message content to the array
+                            if ($senderId === $_SESSION['userId']) {
+                                $messages[] = "<div class='message-block'>$messageContent</div>";
+                            } else {
+                                $messages[] = "<div class='message-block'>$messageContent</div>";
+                            }
+                        }
+
+                        foreach (array_reverse($messages) as $message) {
+                            echo $message;
+                        }
+                    }
+                ?>
+            </div>
+            <form id="message-form" method="post" enctype="multipart/form-data">
+                <div class="form-row">
+                    <div class="col-7">
+                        <input type="text" class="form-control" name="message" placeholder="Input your message here...">
+                    </div>
+                    <div class="col">
+                        <input id="photoInputBtn" type="file" class="form-control-file" name="photo" id="photo">
+                    </div>
+                    <div class="col">
+                        <button id="fileResetBtn" class="reset-file inactive">Remove File</button>
+                        <button type="submit" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </body>
+</html>
+<script>
+    function redirectTo(id){
+        let mainUrl = "index.php?id=";
+        let redirectUrl = mainUrl.concat(id);
+        location.replace(redirectUrl);
+    }
+    var chatBox = document.getElementById('chat-box');
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    function toggleDropdownIcon() {
+        var dropdownIcon = document.getElementById("member-dropdown-icon");
+        if (dropdownIcon.classList.contains("dropdown-icon")) {
+            dropdownIcon.classList.remove("dropdown-icon");
+            dropdownIcon.classList.add("dropdown-icon-flipped");
+            toggleMemberDetails();
+        } else if (dropdownIcon.classList.contains("dropdown-icon-flipped")) {
+            dropdownIcon.classList.remove("dropdown-icon-flipped");
+            dropdownIcon.classList.add("dropdown-icon");
+            toggleMemberDetails();
+        }
+    }
+
+    function toggleMemberDetails() {
+        var memberDetails = document.getElementsByClassName("member-details");
+        for (var i = 0; i < memberDetails.length; i++) {
+            if (memberDetails[i].classList.contains("hidden")) {
+                memberDetails[i].classList.remove("hidden");
+            } else {
+                memberDetails[i].classList.add("hidden");
+            }
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        var memberDetails = document.querySelectorAll('.member-details');
+
+        memberDetails.forEach(function(element) {
+            element.addEventListener('click', function() {
+                var content = this.querySelector('.member-details-content');
+                if (content.style.display === 'block') {
+                    content.style.display = 'none';
+                } else {
+                    content.style.display = 'block';
+                }
+            });
+        });
+    });
+
+    document.getElementById('photoInputBtn').addEventListener('change', function() {
+        var filename = this.value.split('\\').pop(); // Get the filename without the full path
+        var resetBtn = document.getElementById('fileResetBtn');
+        
+        if (filename) {
+            resetBtn.classList.remove('inactive'); // Remove 'inactive' class
+        } else {
+            resetBtn.classList.add('inactive'); // Add 'inactive' class
+        }
+    });
+
+</script>
